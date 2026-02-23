@@ -41,7 +41,7 @@ class TelegramClient:
         chat_id: int,
         text: str,
         *,
-        parse_mode: str | None = None,
+        parse_mode: str | None = "markdown",
         disable_web_page_preview: bool | None = None,
     ) -> dict[str, Any]:
         """Send a text message to a chat."""
