@@ -22,6 +22,8 @@ docker compose up --build
 
 App: http://localhost:8000. Set webhook to your public HTTPS URL (e.g. via ngrok for local testing).
 
+If you see `unauthorized: personal access token is expired` when pulling images, run `docker logout` and try again.
+
 ## Endpoints
 
 - `POST /webhook` — Telegram sends updates here.
