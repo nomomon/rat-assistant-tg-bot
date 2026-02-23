@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 NOT_ALLOWED_MESSAGE = "Вам не разрешено использовать этого бота."
 ERROR_MESSAGE = "Что-то пошло не так. Пожалуйста, попробуйте снова позже."
-
+AUDIO_TRANSCRIPTION_ERROR_MESSAGE = "Не удалось распознать голосовое сообщение. Пожалуйста, попробуйте снова."
+HINT_MESSAGE = "Отправьте текстовое или голосовое сообщение, и я отвечу."
 
 @dataclass
 class HandlerDeps:
@@ -76,7 +77,7 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
                 try:
                     await deps.telegram.send_message(
                         chat_id,
-                        "Could not transcribe the voice message. Please try again or send text.",
+                        AUDIO_TRANSCRIPTION_ERROR_MESSAGE,
                     )
                 except Exception as send_err:
                     logger.warning("Failed to send error reply: %s", send_err)
@@ -87,7 +88,7 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
             try:
                 await deps.telegram.send_message(
                     chat_id,
-                    "Send a text or voice message and I'll reply.",
+                    HINT_MESSAGE,
                 )
             except Exception as e:
                 logger.warning("Failed to send hint: %s", e)
