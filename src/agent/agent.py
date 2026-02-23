@@ -2,7 +2,7 @@
 
 from pydantic_ai import Agent, WebSearchTool
 
-GEMINI_MODEL = "google-gla:gemini-2.0-flash"
+GEMINI_MODEL = "google-gla:gemini-3-flash"
 DEFAULT_INSTRUCTIONS = (
     "You are a helpful assistant. Use web search when you need current information. "
     "Be concise and clear in your replies."
