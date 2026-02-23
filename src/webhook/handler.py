@@ -14,8 +14,8 @@ from src.services.transcribe import TranscribeService
 
 logger = logging.getLogger(__name__)
 
-NOT_ALLOWED_MESSAGE = "You are not allowed to use this bot."
-ERROR_MESSAGE = "Something went wrong. Please try again later."
+NOT_ALLOWED_MESSAGE = "Вам не разрешено использовать этого бота."
+ERROR_MESSAGE = "Что-то пошло не так. Пожалуйста, попробуйте снова позже."
 
 
 @dataclass
