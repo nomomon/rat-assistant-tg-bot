@@ -94,12 +94,14 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
                 logger.warning("Failed to send hint: %s", e)
             return
 
+        # Full conversation (user + model messages) from the last hour; agent sees all of it.
         message_history = await deps.history.get(user_id)
         result = await deps.agent.run(
             user_text,
             message_history=message_history or None,
         )
         reply_text: str = result.output if result.output is not None else ERROR_MESSAGE
+        # This run's new messages (current user turn + model reply); we append to keep history complete.
         new_messages = result.new_messages()
         await deps.history.append(user_id, new_messages)
         await deps.telegram.send_message(chat_id, reply_text)

@@ -24,11 +24,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create Telegram, OpenAI, in-memory history, agent; yield deps."""
+    """Create Telegram, OpenAI, Redis history, agent; yield deps."""
     settings: Settings = app.state.settings
     telegram_client = TelegramClient(settings.telegram_bot_token)
     openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
-    history_service = HistoryService()
+    history_service = HistoryService(redis_url=settings.redis_url)
     transcribe_service = TranscribeService(openai_client, telegram_client)
     agent = create_agent()
 
@@ -38,6 +38,8 @@ async def lifespan(app: FastAPI):
     app.state.agent = agent
 
     yield
+
+    await history_service.aclose()
 
 
 def create_app() -> FastAPI:

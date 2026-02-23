@@ -32,6 +32,10 @@ class Settings(BaseSettings):
         default=None,
         description="Optional secret for webhook verification (X-Telegram-Bot-Api-Secret-Token)",
     )
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis URL for chat history (e.g. redis://redis:6379/0 in Docker)",
+    )
 
     @property
     def allowed_user_ids(self) -> set[int]:
