@@ -3,8 +3,6 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any
-
 from pydantic_ai import Agent
 
 from src.telegram.models import Update
@@ -50,36 +48,51 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
             logger.warning("Failed to send not-allowed message: %s", e)
         return
 
-    # Resolve user message text
-    msg = update.message
-    if msg.text:
-        user_text = msg.text.strip()
-    elif msg.voice:
+    typing_task: asyncio.Task[None] | None = None
+
+    async def typing_loop() -> None:
         try:
-            user_text = await deps.transcribe.transcribe_voice(msg.voice.file_id)
+            await deps.telegram.send_chat_action(chat_id, "typing")
+            while True:
+                await asyncio.sleep(4)
+                await deps.telegram.send_chat_action(chat_id, "typing")
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
-            logger.exception("Transcription failed: %s", e)
+            logger.warning("Typing action failed: %s", e)
+
+    try:
+        typing_task = asyncio.create_task(typing_loop())
+
+        # Resolve user message text
+        msg = update.message
+        if msg.text:
+            user_text = msg.text.strip()
+        elif msg.voice:
+            try:
+                user_text = await deps.transcribe.transcribe_voice(msg.voice.file_id)
+            except Exception as e:
+                logger.exception("Transcription failed: %s", e)
+                try:
+                    await deps.telegram.send_message(
+                        chat_id,
+                        "Could not transcribe the voice message. Please try again or send text.",
+                    )
+                except Exception as send_err:
+                    logger.warning("Failed to send error reply: %s", send_err)
+                return
+            if not user_text:
+                user_text = "(empty transcription)"
+        else:
             try:
                 await deps.telegram.send_message(
                     chat_id,
-                    "Could not transcribe the voice message. Please try again or send text.",
+                    "Send a text or voice message and I'll reply.",
                 )
-            except Exception as send_err:
-                logger.warning("Failed to send error reply: %s", send_err)
+            except Exception as e:
+                logger.warning("Failed to send hint: %s", e)
             return
-        if not user_text:
-            user_text = "(empty transcription)"
-    else:
-        try:
-            await deps.telegram.send_message(
-                chat_id,
-                "Send a text or voice message and I'll reply.",
-            )
-        except Exception as e:
-            logger.warning("Failed to send hint: %s", e)
-        return
 
-    try:
         message_history = await deps.history.get(user_id)
         result = await deps.agent.run(
             user_text,
@@ -95,3 +108,10 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
             await deps.telegram.send_message(chat_id, ERROR_MESSAGE)
         except Exception as send_err:
             logger.warning("Failed to send error reply: %s", send_err)
+    finally:
+        if typing_task is not None:
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass

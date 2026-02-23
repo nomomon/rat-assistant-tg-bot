@@ -36,6 +36,18 @@ class TelegramClient:
             r.raise_for_status()
             return r.content
 
+    async def send_chat_action(self, chat_id: int, action: str) -> None:
+        """Send a chat action (e.g. 'typing'). Logs and ignores failures."""
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                r = await client.post(
+                    f"{self._base}/sendChatAction",
+                    json={"chat_id": chat_id, "action": action},
+                )
+                r.raise_for_status()
+        except Exception as e:
+            logger.warning("send_chat_action failed: %s", e)
+
     async def send_message(
         self,
         chat_id: int,
