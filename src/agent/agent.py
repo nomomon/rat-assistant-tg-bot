@@ -1,8 +1,9 @@
 """Pydantic AI Agent with Gemini and Google Web Search."""
 
 from pydantic_ai import Agent, WebSearchTool
+from pydantic_ai.models.google import GoogleModel
 
-GEMINI_MODEL = "google-gla:gemini-3-flash"
+GEMINI_MODEL = GoogleModel('gemini-3-flash-preview')
 DEFAULT_INSTRUCTIONS = (
     "You are a helpful assistant. Use web search when you need current information. "
     "Be concise and clear in your replies."
