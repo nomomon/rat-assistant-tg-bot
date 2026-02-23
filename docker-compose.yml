@@ -12,8 +12,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Chainguard Redis (cgr.dev) — no Docker Hub login required
   redis:
-    image: redis:7.4-alpine
+    image: cgr.dev/chainguard/redis:latest
     ports:
       - "6379:6379"
     volumes:
