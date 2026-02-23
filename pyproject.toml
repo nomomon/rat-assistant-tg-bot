@@ -1,14 +1,13 @@
 [project]
 name = "krysatich-bot"
 version = "0.1.0"
-description = "Telegram bot with Pydantic AI, Gemini, Whisper, and Redis"
+description = "Telegram bot with Pydantic AI, Gemini, and Whisper"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "httpx>=0.28.0",
-    "redis>=5.2.0",
     "pydantic-ai>=0.0.20",
     "openai>=1.55.0",
     "pydantic-settings>=2.6.0",

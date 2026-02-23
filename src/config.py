@@ -1,8 +1,7 @@
 """Application configuration from environment variables."""
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic_core import AliasChoices
 
 
 class Settings(BaseSettings):
@@ -25,7 +24,6 @@ class Settings(BaseSettings):
         description="Google API key for Gemini",
         validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
     )
-    redis_url: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")
     allowed_telegram_user_ids: str = Field(
         ...,
         description="Comma-separated list of allowed Telegram user IDs",

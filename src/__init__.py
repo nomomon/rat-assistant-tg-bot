@@ -1,1 +1,1 @@
-"""Krysatich Telegram bot with Pydantic AI, Whisper, and Redis."""
+"""Krysatich Telegram bot with Pydantic AI and Whisper."""

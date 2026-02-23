@@ -1,10 +1,9 @@
-"""FastAPI app: webhook endpoint, lifespan for Redis and clients."""
+"""FastAPI app: webhook endpoint, lifespan for clients."""
 
 import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-import redis.asyncio as redis
 from fastapi import FastAPI, Request, Response
 from openai import AsyncOpenAI
 
@@ -25,24 +24,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create Redis, Telegram, OpenAI, agent; yield deps; close connections."""
+    """Create Telegram, OpenAI, in-memory history, agent; yield deps."""
     settings: Settings = app.state.settings
-    redis_client = redis.from_url(settings.redis_url)
     telegram_client = TelegramClient(settings.telegram_bot_token)
     openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
-    history_service = HistoryService(redis_client)
+    history_service = HistoryService()
     transcribe_service = TranscribeService(openai_client, telegram_client)
     agent = create_agent()
 
-    app.state.redis = redis_client
     app.state.telegram = telegram_client
     app.state.history = history_service
     app.state.transcribe = transcribe_service
     app.state.agent = agent
 
     yield
-
-    await redis_client.aclose()
 
 
 def create_app() -> FastAPI:
@@ -78,14 +73,8 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        """Check Redis connectivity."""
-        try:
-            r = app.state.redis
-            await r.ping()
-            return {"status": "ok", "redis": "ok"}
-        except Exception as e:
-            logger.warning("Health check failed: %s", e)
-            return {"status": "error", "redis": str(e)}
+        """Basic liveness check."""
+        return {"status": "ok"}
 
     return app
 

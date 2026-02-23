@@ -5,26 +5,4 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    environment:
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
-
-  # Chainguard Redis (cgr.dev) — no Docker Hub login required
-  redis:
-    image: cgr.dev/chainguard/redis:latest
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-volumes:
-  redis_data:
