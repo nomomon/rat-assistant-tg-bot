@@ -9,3 +9,4 @@ from src.telegram.client import TelegramClient
 class AgentDeps:
     telegram_client: TelegramClient
     chat_id: int
+    google_api_key: str

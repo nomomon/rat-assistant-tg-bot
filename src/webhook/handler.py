@@ -43,6 +43,7 @@ class HandlerDeps:
     transcribe: TranscribeService
     agent: Agent[AgentDeps, str]
     allowed_user_ids: set[int]
+    google_api_key: str
 
 
 async def process_update(update: Update, deps: HandlerDeps) -> None:
@@ -161,7 +162,11 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
 
         # Full conversation (user + model messages) from the last hour; agent sees all of it.
         message_history = await deps.history.get(user_id)
-        agent_deps = AgentDeps(telegram_client=deps.telegram, chat_id=chat_id)
+        agent_deps = AgentDeps(
+            telegram_client=deps.telegram,
+            chat_id=chat_id,
+            google_api_key=deps.google_api_key,
+        )
         result = await deps.agent.run(
             user_content,
             deps=agent_deps,

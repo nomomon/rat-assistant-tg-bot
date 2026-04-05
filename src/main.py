@@ -69,6 +69,7 @@ def create_app() -> FastAPI:
             transcribe=app.state.transcribe,
             agent=app.state.agent,
             allowed_user_ids=settings.allowed_user_ids,
+            google_api_key=settings.google_api_key,
         )
         asyncio.create_task(process_update(update, deps))
         return Response(status_code=200)

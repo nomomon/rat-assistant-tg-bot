@@ -66,3 +66,25 @@ class TelegramClient:
             r = await client.post(f"{self._base}/sendMessage", json=payload)
             r.raise_for_status()
             return r.json()
+
+    async def send_audio(
+        self,
+        chat_id: int,
+        audio: bytes,
+        *,
+        filename: str = "reply.wav",
+        caption: str | None = None,
+    ) -> dict[str, Any]:
+        """Send an audio file (e.g. WAV) as a Telegram audio message."""
+        data: dict[str, Any] = {"chat_id": chat_id}
+        if caption is not None:
+            data["caption"] = caption
+        files = {"audio": (filename, audio, "audio/wav")}
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            r = await client.post(
+                f"{self._base}/sendAudio",
+                data=data,
+                files=files,
+            )
+            r.raise_for_status()
+            return r.json()

@@ -12,6 +12,7 @@ dependencies = [
     "openai>=1.55.0",
     "pydantic-settings>=2.6.0",
     "redis>=5.0.0",
+    "google-genai>=1.0.0",
 ]
 
 [project.optional-dependencies]
