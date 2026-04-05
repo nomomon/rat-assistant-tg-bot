@@ -1,9 +1,9 @@
-"""Process Telegram webhook updates: whitelist, text/voice, agent, history, reply."""
+"""Process Telegram webhook updates: whitelist, text/voice/media, agent, history, reply."""
 
 import asyncio
 import logging
 from dataclasses import dataclass
-from pydantic_ai import Agent
+from pydantic_ai import Agent, BinaryContent
 
 from src.telegram.models import Update
 from src.telegram.client import TelegramClient
@@ -16,7 +16,23 @@ logger = logging.getLogger(__name__)
 NOT_ALLOWED_MESSAGE = "Вам не разрешено использовать этого бота."
 ERROR_MESSAGE = "Что-то пошло не так. Пожалуйста, попробуйте снова позже."
 AUDIO_TRANSCRIPTION_ERROR_MESSAGE = "Не удалось распознать голосовое сообщение. Пожалуйста, попробуйте снова."
-HINT_MESSAGE = "Отправьте текстовое или голосовое сообщение, и я отвечу."
+MEDIA_ERROR_MESSAGE = "Не удалось загрузить медиафайл. Пожалуйста, попробуйте снова."
+HINT_MESSAGE = "Отправьте текстовое или голосовое сообщение, фото или документ (PDF / изображение), и я отвечу."
+
+MAX_MEDIA_BYTES = 20 * 1024 * 1024  # 20 MB inline limit for Gemini
+
+# MIME types that Gemini can process as images or documents
+_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_DOCUMENT_MIME_TYPES = {"application/pdf"}
+
+
+async def _download_binary(telegram: TelegramClient, file_id: str) -> bytes:
+    """Resolve file_id to bytes via Telegram getFile + download."""
+    file_info = await telegram.get_file(file_id)
+    file_path = file_info.get("file_path")
+    if not file_path:
+        raise ValueError(f"Telegram getFile returned no file_path for {file_id}")
+    return await telegram.download_file(file_path)
 
 @dataclass
 class HandlerDeps:
@@ -66,31 +82,79 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
     try:
         typing_task = asyncio.create_task(typing_loop())
 
-        # Resolve user message text
+        # Resolve user message into text or a list of content parts for the agent
         msg = update.message
+        user_content: str | list[str | BinaryContent]
+
         if msg.text:
-            user_text = msg.text.strip()
+            user_content = msg.text.strip()
+
         elif msg.voice:
             try:
-                user_text = await deps.transcribe.transcribe_voice(msg.voice.file_id)
+                transcribed = await deps.transcribe.transcribe_voice(msg.voice.file_id)
             except Exception as e:
                 logger.exception("Transcription failed: %s", e)
                 try:
-                    await deps.telegram.send_message(
-                        chat_id,
-                        AUDIO_TRANSCRIPTION_ERROR_MESSAGE,
-                    )
+                    await deps.telegram.send_message(chat_id, AUDIO_TRANSCRIPTION_ERROR_MESSAGE)
                 except Exception as send_err:
                     logger.warning("Failed to send error reply: %s", send_err)
                 return
-            if not user_text:
-                user_text = "(empty transcription)"
+            user_content = transcribed or "(empty transcription)"
+
+        elif msg.photo:
+            # Telegram sends multiple sizes; take the largest (last entry)
+            largest = max(msg.photo, key=lambda p: p.file_size or 0)
+            try:
+                data = await _download_binary(deps.telegram, largest.file_id)
+            except Exception as e:
+                logger.exception("Photo download failed: %s", e)
+                try:
+                    await deps.telegram.send_message(chat_id, MEDIA_ERROR_MESSAGE)
+                except Exception as send_err:
+                    logger.warning("Failed to send error reply: %s", send_err)
+                return
+            if len(data) > MAX_MEDIA_BYTES:
+                logger.warning("Photo too large (%d bytes), skipping binary", len(data))
+                user_content = msg.caption or "(photo too large to process)"
+            else:
+                parts: list[str | BinaryContent] = []
+                if msg.caption:
+                    parts.append(msg.caption.strip())
+                parts.append(BinaryContent(data=data, media_type="image/jpeg"))
+                user_content = parts
+
+        elif msg.document:
+            doc = msg.document
+            mime = (doc.mime_type or "").lower()
+            if mime in _IMAGE_MIME_TYPES or mime in _DOCUMENT_MIME_TYPES:
+                try:
+                    data = await _download_binary(deps.telegram, doc.file_id)
+                except Exception as e:
+                    logger.exception("Document download failed: %s", e)
+                    try:
+                        await deps.telegram.send_message(chat_id, MEDIA_ERROR_MESSAGE)
+                    except Exception as send_err:
+                        logger.warning("Failed to send error reply: %s", send_err)
+                    return
+                if len(data) > MAX_MEDIA_BYTES:
+                    logger.warning("Document too large (%d bytes), skipping binary", len(data))
+                    user_content = msg.caption or f"(file '{doc.file_name}' too large to process)"
+                else:
+                    parts = []
+                    if msg.caption:
+                        parts.append(msg.caption.strip())
+                    parts.append(BinaryContent(data=data, media_type=mime))
+                    user_content = parts
+            else:
+                # Unsupported file type — pass as descriptive text so the agent can acknowledge it
+                name_part = f"'{doc.file_name}'" if doc.file_name else "unknown filename"
+                type_part = f" ({mime})" if mime else ""
+                file_note = f"[Файл: {name_part}{type_part}]"
+                user_content = f"{file_note} {msg.caption or ''}".strip()
+
         else:
             try:
-                await deps.telegram.send_message(
-                    chat_id,
-                    HINT_MESSAGE,
-                )
+                await deps.telegram.send_message(chat_id, HINT_MESSAGE)
             except Exception as e:
                 logger.warning("Failed to send hint: %s", e)
             return
@@ -99,7 +163,7 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
         message_history = await deps.history.get(user_id)
         agent_deps = AgentDeps(telegram_client=deps.telegram, chat_id=chat_id)
         result = await deps.agent.run(
-            user_text,
+            user_content,
             deps=agent_deps,
             message_history=message_history or None,
         )

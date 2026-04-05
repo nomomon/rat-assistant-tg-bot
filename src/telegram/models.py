@@ -34,6 +34,26 @@ class Voice(BaseModel):
     mime_type: str | None = None
 
 
+class PhotoSize(BaseModel):
+    """One size of a photo or thumbnail."""
+
+    file_id: str
+    file_unique_id: str = ""
+    width: int = 0
+    height: int = 0
+    file_size: int | None = None
+
+
+class Document(BaseModel):
+    """Generic file (document, PDF, image-as-file, etc.)."""
+
+    file_id: str
+    file_unique_id: str = ""
+    file_name: str | None = None
+    mime_type: str | None = None
+    file_size: int | None = None
+
+
 class Message(BaseModel):
     """Telegram message."""
 
@@ -42,7 +62,10 @@ class Message(BaseModel):
     chat: Chat
     date: int = 0
     text: str | None = None
+    caption: str | None = None
     voice: Voice | None = None
+    photo: list[PhotoSize] | None = None
+    document: Document | None = None
 
     model_config = {"populate_by_name": True}
 
