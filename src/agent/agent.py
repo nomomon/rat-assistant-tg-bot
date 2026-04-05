@@ -8,7 +8,7 @@ from pydantic_ai.models.google import GoogleModel
 from src.agent.deps import AgentDeps
 from src.agent.tools import send_message
 
-GEMINI_MODEL = GoogleModel('gemini-3-flash-preview')
+GEMINI_MODEL = GoogleModel('gemini-3.1-pro-preview')
 PROMPT_PATH = Path(__file__).parent / "prompt.md"
 FALLBACK_INSTRUCTIONS = (
     "You are a helpful assistant. Use web search when you need current information. "
