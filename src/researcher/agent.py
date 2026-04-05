@@ -7,7 +7,7 @@ from pydantic_ai.models.google import GoogleModel
 
 from src.utils import load_prompt
 
-GEMINI_MODEL = GoogleModel('gemini-2.5-pro-preview-03-25')
+GEMINI_MODEL = GoogleModel('gemini-3-flash-preview')
 PROMPT_PATH = Path(__file__).parent / "prompt.md"
 
 
