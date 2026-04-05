@@ -11,7 +11,7 @@ from pydantic_ai import RunContext
 
 from src.agent.deps import AgentDeps
 from src.researcher.agent import researcher_agent
-from src.tts import text_to_wav_file
+from src.tts import text_to_wav_file, wav_bytes_to_ogg_opus
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +106,12 @@ async def send_message(
 
     Set *as_voice* to True when a spoken reply fits best — for example the user
     asked for voice, prefers listening, or you want to improve accessibility.
-    In that case the reply is sent as an audio attachment (with a short caption);
+    In that case the reply is sent as a voice message (with a short caption);
     if synthesis or upload fails, the reply is sent as plain text instead.
 
     Args:
         text: The full response text to send to the user.
-        as_voice: If True, synthesize speech and send as Telegram audio; default False.
+        as_voice: If True, synthesize speech and send as a Telegram voice message; default False.
     """
     if not text.strip():
         logger.warning("send_message called with empty text — skipping")
@@ -137,11 +137,12 @@ async def send_message(
                 api_key=ctx.deps.google_api_key,
             )
         )
-        audio_bytes = Path(tmp_path).read_bytes()
+        wav_bytes = Path(tmp_path).read_bytes()
+        ogg_bytes = wav_bytes_to_ogg_opus(wav_bytes)
         caption = text.strip()[:TELEGRAM_CAPTION_MAX]
-        await ctx.deps.telegram_client.send_audio(
+        await ctx.deps.telegram_client.send_voice(
             ctx.deps.chat_id,
-            audio_bytes,
+            ogg_bytes,
             caption=caption,
         )
     except Exception:
