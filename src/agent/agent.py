@@ -1,18 +1,18 @@
-"""Pydantic AI Agent with Gemini and Google Web Search."""
+"""Pydantic AI Agent with Gemini — main conversational agent."""
 
 from pathlib import Path
 
-from pydantic_ai import Agent, WebSearchTool
+from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
 
 from src.agent.deps import AgentDeps
-from src.agent.tools import send_message
+from src.agent.tools import research, send_message
 
 GEMINI_MODEL = GoogleModel('gemini-3.1-pro-preview')
 PROMPT_PATH = Path(__file__).parent / "prompt.md"
 FALLBACK_INSTRUCTIONS = (
-    "You are a helpful assistant. Use web search when you need current information. "
-    "Be concise and clear in your replies."
+    "You are a helpful assistant. Use the research tool when you need current information "
+    "from the web. Be concise and clear in your replies. Always call send_message to reply."
 )
 
 
@@ -30,14 +30,13 @@ def create_agent(
     model: str = GEMINI_MODEL,
     instructions: str | None = None,
 ) -> Agent[AgentDeps, str]:
-    """Create the Gemini agent with web search and send_message tool."""
+    """Create the main conversational agent with send_message and research tools."""
     if instructions is None:
         instructions = _load_instructions()
     return Agent(
         model,
         deps_type=AgentDeps,
-        builtin_tools=[WebSearchTool()],
-        tools=[send_message],
+        tools=[send_message, research],
         instructions=instructions,
         retries=1,
     )

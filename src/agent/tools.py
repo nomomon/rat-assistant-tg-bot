@@ -5,6 +5,7 @@ import logging
 from pydantic_ai import RunContext
 
 from src.agent.deps import AgentDeps
+from src.researcher.agent import researcher_agent
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,32 @@ def _split_message(text: str, limit: int = TELEGRAM_MAX_LENGTH) -> list[str]:
         parts.append(text)
 
     return parts
+
+
+async def research(ctx: RunContext[AgentDeps], query: str) -> str:
+    """Research a topic on the web and return a detailed report.
+
+    Use this tool whenever the user's question requires current or factual
+    information from the internet — for example: recent news, definitions,
+    how-to instructions, biographical facts, scientific data, or anything
+    you are not certain about.
+
+    Write the query as a thorough briefing for the researcher:
+    - State exactly what information is needed
+    - Describe the user's goal and context
+    - Specify the required level of detail (e.g. brief summary vs. full explanation)
+
+    The researcher will search the web and return a structured report with sources.
+    Use that report to compose your reply via `send_message`.
+
+    Args:
+        query: Detailed description of what to research and why.
+
+    Returns:
+        A research report as plain text, including sources.
+    """
+    result = await researcher_agent.run(query)
+    return result.output
 
 
 async def send_message(ctx: RunContext[AgentDeps], text: str) -> None:
