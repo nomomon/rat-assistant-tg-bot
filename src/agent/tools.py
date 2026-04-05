@@ -117,6 +117,10 @@ async def send_message(
         logger.warning("send_message called with empty text — skipping")
         return
 
+    begin = ctx.deps.begin_reply_chat_action
+    if begin is not None:
+        await begin(as_voice)
+
     if not as_voice:
         await _send_text_chunks(ctx, text)
         return

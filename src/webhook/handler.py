@@ -67,22 +67,33 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
             logger.warning("Failed to send not-allowed message: %s", e)
         return
 
-    typing_task: asyncio.Task[None] | None = None
+    reply_action_task: asyncio.Task[None] | None = None
 
-    async def typing_loop() -> None:
-        try:
-            await deps.telegram.send_chat_action(chat_id, "typing")
-            while True:
-                await asyncio.sleep(4)
-                await deps.telegram.send_chat_action(chat_id, "typing")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.warning("Typing action failed: %s", e)
+    async def begin_reply_chat_action(as_voice: bool) -> None:
+        nonlocal reply_action_task
+        if reply_action_task is not None:
+            reply_action_task.cancel()
+            try:
+                await reply_action_task
+            except asyncio.CancelledError:
+                pass
+        # Telegram sendChatAction: typing for text; record_voice for voice-note style replies.
+        action = "record_voice" if as_voice else "typing"
+
+        async def reply_action_loop() -> None:
+            try:
+                await deps.telegram.send_chat_action(chat_id, action)
+                while True:
+                    await asyncio.sleep(4)
+                    await deps.telegram.send_chat_action(chat_id, action)
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning("Reply chat action failed: %s", e)
+
+        reply_action_task = asyncio.create_task(reply_action_loop())
 
     try:
-        typing_task = asyncio.create_task(typing_loop())
-
         # Resolve user message into text or a list of content parts for the agent
         msg = update.message
         user_content: str | list[str | BinaryContent]
@@ -166,6 +177,7 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
             telegram_client=deps.telegram,
             chat_id=chat_id,
             google_api_key=deps.google_api_key,
+            begin_reply_chat_action=begin_reply_chat_action,
         )
         result = await deps.agent.run(
             user_content,
@@ -182,9 +194,9 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
         except Exception as send_err:
             logger.warning("Failed to send error reply: %s", send_err)
     finally:
-        if typing_task is not None:
-            typing_task.cancel()
+        if reply_action_task is not None:
+            reply_action_task.cancel()
             try:
-                await typing_task
+                await reply_action_task
             except asyncio.CancelledError:
                 pass
