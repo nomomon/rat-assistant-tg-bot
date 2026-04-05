@@ -9,6 +9,7 @@ from src.telegram.models import Update
 from src.telegram.client import TelegramClient
 from src.services.history import HistoryService
 from src.services.transcribe import TranscribeService
+from src.agent.deps import AgentDeps
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class HandlerDeps:
     telegram: TelegramClient
     history: HistoryService
     transcribe: TranscribeService
-    agent: Agent[None, str]
+    agent: Agent[AgentDeps, str]
     allowed_user_ids: set[int]
 
 
@@ -96,15 +97,15 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
 
         # Full conversation (user + model messages) from the last hour; agent sees all of it.
         message_history = await deps.history.get(user_id)
+        agent_deps = AgentDeps(telegram_client=deps.telegram, chat_id=chat_id)
         result = await deps.agent.run(
             user_text,
+            deps=agent_deps,
             message_history=message_history or None,
         )
-        reply_text: str = result.output if result.output is not None else ERROR_MESSAGE
-        # This run's new messages (current user turn + model reply); we append to keep history complete.
+        # The agent replies via the send_message tool; we only persist history here.
         new_messages = result.new_messages()
         await deps.history.append(user_id, new_messages)
-        await deps.telegram.send_message(chat_id, reply_text)
     except Exception as e:
         logger.exception("Agent or send failed: %s", e)
         try:
