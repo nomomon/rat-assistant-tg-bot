@@ -173,11 +173,19 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
 
         # Full conversation (user + model messages) from the last hour; agent sees all of it.
         message_history = await deps.history.get(user_id)
+
+        # Start "typing" indicator right away so the user sees feedback
+        # while the agent is thinking.  The loop keeps running until
+        # the finally-block cancels it.
+        await begin_reply_chat_action(False)
+
+        send_lock = asyncio.Lock()
         agent_deps = AgentDeps(
             telegram_client=deps.telegram,
             chat_id=chat_id,
             google_api_key=deps.google_api_key,
             begin_reply_chat_action=begin_reply_chat_action,
+            send_lock=send_lock,
         )
         result = await deps.agent.run(
             user_content,

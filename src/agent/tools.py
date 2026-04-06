@@ -117,40 +117,53 @@ async def send_message(
         logger.warning("send_message called with empty text — skipping")
         return
 
-    begin = ctx.deps.begin_reply_chat_action
-    if begin is not None:
-        await begin(as_voice)
+    lock = ctx.deps.send_lock
+    if lock is not None:
+        await lock.acquire()
 
-    if not as_voice:
-        await _send_text_chunks(ctx, text)
-        return
-
-    tmp_path: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp_path = tmp.name
-        await asyncio.to_thread(
-            partial(
-                text_to_wav_file,
-                text.strip(),
-                Path(tmp_path),
-                api_key=ctx.deps.google_api_key,
+        if not as_voice:
+            await _send_text_chunks(ctx, text)
+            return
+
+        # Switch the chat action to "record_voice" while we generate audio.
+        begin = ctx.deps.begin_reply_chat_action
+        if begin is not None:
+            await begin(True)
+
+        tmp_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
+            await asyncio.to_thread(
+                partial(
+                    text_to_wav_file,
+                    text.strip(),
+                    Path(tmp_path),
+                    api_key=ctx.deps.google_api_key,
+                )
             )
-        )
-        wav_bytes = Path(tmp_path).read_bytes()
-        ogg_bytes = wav_bytes_to_ogg_opus(wav_bytes)
-        caption = text.strip()[:TELEGRAM_CAPTION_MAX]
-        await ctx.deps.telegram_client.send_voice(
-            ctx.deps.chat_id,
-            ogg_bytes,
-            caption=caption,
-        )
-    except Exception:
-        logger.exception("send_message as_voice failed — falling back to text")
-        await _send_text_chunks(ctx, text)
+            wav_bytes = Path(tmp_path).read_bytes()
+            ogg_bytes = wav_bytes_to_ogg_opus(wav_bytes)
+            caption = text.strip()[:TELEGRAM_CAPTION_MAX]
+            await ctx.deps.telegram_client.send_voice(
+                ctx.deps.chat_id,
+                ogg_bytes,
+                caption=caption,
+            )
+        except Exception:
+            logger.exception("send_message as_voice failed — falling back to text")
+            await _send_text_chunks(ctx, text)
+        finally:
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+        # Revert to "typing" so subsequent processing shows the right indicator.
+        if begin is not None:
+            await begin(False)
     finally:
-        if tmp_path is not None:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        if lock is not None:
+            lock.release()
