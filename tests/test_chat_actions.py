@@ -124,14 +124,30 @@ async def test_voice_send_switches_to_record_voice():
 
 
 @pytest.mark.asyncio
-async def test_send_lock_serialises_concurrent_sends():
-    """Multiple concurrent send_message calls must deliver messages in order."""
+async def test_send_lock_serializes_concurrent_sends():
+    """Multiple concurrent send_message calls must not overlap.
+
+    We introduce a small delay in the mock ``send_message`` so that without a
+    lock the sends would interleave.  With the lock they must execute
+    sequentially, producing a deterministic order.
+    """
     from src.agent.deps import AgentDeps
 
     log = _ActionLog()
     lock = asyncio.Lock()
+    client = _make_telegram_client(log)
+
+    # Add a short delay so that unserialized sends would overlap.
+    _original_send = client.send_message.side_effect
+
+    async def _slow_send(chat_id, text, *, parse_mode="markdown"):
+        await asyncio.sleep(0.05)
+        return await _original_send(chat_id, text, parse_mode=parse_mode)
+
+    client.send_message = AsyncMock(side_effect=_slow_send)
+
     deps = AgentDeps(
-        telegram_client=_make_telegram_client(log),
+        telegram_client=client,
         chat_id=1,
         google_api_key="fake",
         begin_reply_chat_action=_make_begin_action(log),
@@ -142,7 +158,7 @@ async def test_send_lock_serialises_concurrent_sends():
 
     from src.agent.tools import send_message
 
-    # Fire three sends concurrently — they must arrive in FIFO order.
+    # Fire three sends concurrently — the lock must serialize them.
     await asyncio.gather(
         send_message(ctx, "first"),
         send_message(ctx, "second"),
