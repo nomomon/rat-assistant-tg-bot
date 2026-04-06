@@ -27,4 +27,5 @@ def create_agent(
         tools=[send_message, research],
         instructions=instructions,
         retries=1,
+        output_retries=4,
     )

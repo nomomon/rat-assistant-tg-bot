@@ -4,6 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pydantic_ai import Agent, BinaryContent
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from src.telegram.models import Update
 from src.telegram.client import TelegramClient
@@ -195,6 +196,12 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
         # The agent replies via the send_message tool; we only persist history here.
         new_messages = result.new_messages()
         await deps.history.append(user_id, new_messages)
+    except UnexpectedModelBehavior as e:
+        logger.exception("Agent output validation failed: %s", e)
+        try:
+            await deps.telegram.send_message(chat_id, ERROR_MESSAGE)
+        except Exception as send_err:
+            logger.warning("Failed to send error reply: %s", send_err)
     except Exception as e:
         logger.exception("Agent or send failed: %s", e)
         try:

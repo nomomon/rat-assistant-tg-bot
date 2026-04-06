@@ -19,6 +19,7 @@ def create_researcher_agent() -> Agent[None, str]:
         builtin_tools=[WebSearchTool()],
         instructions=load_prompt(PROMPT_PATH),
         retries=1,
+        output_retries=4,
     )
 
 
