@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from src.telegram.models import Update
 from src.telegram.client import TelegramClient
@@ -35,6 +36,81 @@ async def _download_binary(telegram: TelegramClient, file_id: str) -> bytes:
         raise ValueError(f"Telegram getFile returned no file_path for {file_id}")
     return await telegram.download_file(file_path)
 
+
+async def _resolve_user_content(update: Update, deps: "HandlerDeps") -> str | list[str | BinaryContent] | None:
+    """Resolve one update into user content understood by the agent."""
+    msg = update.message
+    if not msg:
+        return None
+
+    chat_id = update.chat_id
+    if chat_id is None:
+        return None
+
+    if msg.text:
+        return msg.text.strip()
+
+    if msg.voice:
+        try:
+            transcribed = await deps.transcribe.transcribe_voice(msg.voice.file_id)
+        except Exception as e:
+            logger.exception("Transcription failed: %s", e)
+            try:
+                await deps.telegram.send_message(chat_id, AUDIO_TRANSCRIPTION_ERROR_MESSAGE)
+            except Exception as send_err:
+                logger.warning("Failed to send error reply: %s", send_err)
+            return None
+        return transcribed or "(empty transcription)"
+
+    if msg.photo:
+        largest = max(msg.photo, key=lambda p: p.file_size or 0)
+        try:
+            data = await _download_binary(deps.telegram, largest.file_id)
+        except Exception as e:
+            logger.exception("Photo download failed: %s", e)
+            try:
+                await deps.telegram.send_message(chat_id, MEDIA_ERROR_MESSAGE)
+            except Exception as send_err:
+                logger.warning("Failed to send error reply: %s", send_err)
+            return None
+        if len(data) > MAX_MEDIA_BYTES:
+            logger.warning("Photo too large (%d bytes), skipping binary", len(data))
+            return msg.caption or "(photo too large to process)"
+        parts: list[str | BinaryContent] = []
+        if msg.caption:
+            parts.append(msg.caption.strip())
+        parts.append(BinaryContent(data=data, media_type="image/jpeg"))
+        return parts
+
+    if msg.document:
+        doc = msg.document
+        mime = (doc.mime_type or "").lower()
+        if mime in _IMAGE_MIME_TYPES or mime in _DOCUMENT_MIME_TYPES:
+            try:
+                data = await _download_binary(deps.telegram, doc.file_id)
+            except Exception as e:
+                logger.exception("Document download failed: %s", e)
+                try:
+                    await deps.telegram.send_message(chat_id, MEDIA_ERROR_MESSAGE)
+                except Exception as send_err:
+                    logger.warning("Failed to send error reply: %s", send_err)
+                return None
+            if len(data) > MAX_MEDIA_BYTES:
+                logger.warning("Document too large (%d bytes), skipping binary", len(data))
+                return msg.caption or f"(file '{doc.file_name}' too large to process)"
+            parts = []
+            if msg.caption:
+                parts.append(msg.caption.strip())
+            parts.append(BinaryContent(data=data, media_type=mime))
+            return parts
+        # Unsupported file type — pass as descriptive text so the agent can acknowledge it.
+        name_part = f"'{doc.file_name}'" if doc.file_name else "unknown filename"
+        type_part = f" ({mime})" if mime else ""
+        file_note = f"[Файл: {name_part}{type_part}]"
+        return f"{file_note} {msg.caption or ''}".strip()
+
+    return None
+
 @dataclass
 class HandlerDeps:
     """Dependencies for the webhook handler."""
@@ -48,17 +124,28 @@ class HandlerDeps:
 
 
 async def process_update(update: Update, deps: HandlerDeps) -> None:
-    """
-    Handle one Telegram update: whitelist, resolve text (or transcribe voice),
-    run agent with history, persist history, send reply.
-    """
-    if not update.message or not update.message.from_user:
+    """Handle one Telegram update."""
+    await process_updates_batch([update], deps)
+
+
+async def process_updates_batch(updates: list[Update], deps: HandlerDeps) -> None:
+    """Handle a burst of Telegram updates as one agent run."""
+    if not updates:
         return
 
-    user_id = update.user_id
-    chat_id = update.chat_id
+    first = updates[0]
+    if not first.message or not first.message.from_user:
+        return
+
+    user_id = first.user_id
+    chat_id = first.chat_id
     if user_id is None or chat_id is None:
         return
+
+    for update in updates[1:]:
+        if update.user_id != user_id or update.chat_id != chat_id:
+            logger.warning("Skipping mixed-user mixed-chat batch")
+            return
 
     # Whitelist
     if user_id not in deps.allowed_user_ids:
@@ -95,77 +182,16 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
         reply_action_task = asyncio.create_task(reply_action_loop())
 
     try:
-        # Resolve user message into text or a list of content parts for the agent
-        msg = update.message
-        user_content: str | list[str | BinaryContent]
+        user_contents: list[str | list[str | BinaryContent]] = []
+        for update in updates:
+            user_content = await _resolve_user_content(update, deps)
+            if user_content is None:
+                continue
+            if isinstance(user_content, str) and not user_content.strip():
+                continue
+            user_contents.append(user_content)
 
-        if msg.text:
-            user_content = msg.text.strip()
-
-        elif msg.voice:
-            try:
-                transcribed = await deps.transcribe.transcribe_voice(msg.voice.file_id)
-            except Exception as e:
-                logger.exception("Transcription failed: %s", e)
-                try:
-                    await deps.telegram.send_message(chat_id, AUDIO_TRANSCRIPTION_ERROR_MESSAGE)
-                except Exception as send_err:
-                    logger.warning("Failed to send error reply: %s", send_err)
-                return
-            user_content = transcribed or "(empty transcription)"
-
-        elif msg.photo:
-            # Telegram sends multiple sizes; take the largest (last entry)
-            largest = max(msg.photo, key=lambda p: p.file_size or 0)
-            try:
-                data = await _download_binary(deps.telegram, largest.file_id)
-            except Exception as e:
-                logger.exception("Photo download failed: %s", e)
-                try:
-                    await deps.telegram.send_message(chat_id, MEDIA_ERROR_MESSAGE)
-                except Exception as send_err:
-                    logger.warning("Failed to send error reply: %s", send_err)
-                return
-            if len(data) > MAX_MEDIA_BYTES:
-                logger.warning("Photo too large (%d bytes), skipping binary", len(data))
-                user_content = msg.caption or "(photo too large to process)"
-            else:
-                parts: list[str | BinaryContent] = []
-                if msg.caption:
-                    parts.append(msg.caption.strip())
-                parts.append(BinaryContent(data=data, media_type="image/jpeg"))
-                user_content = parts
-
-        elif msg.document:
-            doc = msg.document
-            mime = (doc.mime_type or "").lower()
-            if mime in _IMAGE_MIME_TYPES or mime in _DOCUMENT_MIME_TYPES:
-                try:
-                    data = await _download_binary(deps.telegram, doc.file_id)
-                except Exception as e:
-                    logger.exception("Document download failed: %s", e)
-                    try:
-                        await deps.telegram.send_message(chat_id, MEDIA_ERROR_MESSAGE)
-                    except Exception as send_err:
-                        logger.warning("Failed to send error reply: %s", send_err)
-                    return
-                if len(data) > MAX_MEDIA_BYTES:
-                    logger.warning("Document too large (%d bytes), skipping binary", len(data))
-                    user_content = msg.caption or f"(file '{doc.file_name}' too large to process)"
-                else:
-                    parts = []
-                    if msg.caption:
-                        parts.append(msg.caption.strip())
-                    parts.append(BinaryContent(data=data, media_type=mime))
-                    user_content = parts
-            else:
-                # Unsupported file type — pass as descriptive text so the agent can acknowledge it
-                name_part = f"'{doc.file_name}'" if doc.file_name else "unknown filename"
-                type_part = f" ({mime})" if mime else ""
-                file_note = f"[Файл: {name_part}{type_part}]"
-                user_content = f"{file_note} {msg.caption or ''}".strip()
-
-        else:
+        if not user_contents:
             try:
                 await deps.telegram.send_message(chat_id, HINT_MESSAGE)
             except Exception as e:
@@ -174,6 +200,10 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
 
         # Full conversation (user + model messages) from the last hour; agent sees all of it.
         message_history = await deps.history.get(user_id)
+        pre_messages = [
+            ModelRequest(parts=[UserPromptPart(content=content)])
+            for content in user_contents[:-1]
+        ]
 
         # Start "typing" indicator right away so the user sees feedback
         # while the agent is thinking.  The loop keeps running until
@@ -189,9 +219,9 @@ async def process_update(update: Update, deps: HandlerDeps) -> None:
             send_lock=send_lock,
         )
         result = await deps.agent.run(
-            user_content,
+            user_contents[-1],
             deps=agent_deps,
-            message_history=message_history or None,
+            message_history=(message_history + pre_messages) or None,
         )
         # The agent replies via the send_message tool; we only persist history here.
         new_messages = result.new_messages()

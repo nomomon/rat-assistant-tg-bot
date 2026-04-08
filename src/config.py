@@ -36,6 +36,12 @@ class Settings(BaseSettings):
         default="redis://localhost:6379/0",
         description="Redis URL for chat history (e.g. redis://redis:6379/0 in Docker)",
     )
+    message_coalesce_window_seconds: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=10.0,
+        description="Time window for coalescing burst user messages into one run",
+    )
 
     @property
     def allowed_user_ids(self) -> set[int]:
