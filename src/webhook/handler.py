@@ -7,6 +7,7 @@ from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
+from src.errors import UserFacingError
 from src.telegram.models import Update
 from src.telegram.client import TelegramClient
 from src.services.history import HistoryService
@@ -53,6 +54,8 @@ async def _resolve_user_content(update: Update, deps: "HandlerDeps") -> str | li
     if msg.voice:
         try:
             transcribed = await deps.transcribe.transcribe_voice(msg.voice.file_id)
+        except UserFacingError:
+            raise
         except Exception as e:
             logger.exception("Transcription failed: %s", e)
             try:
@@ -184,7 +187,15 @@ async def process_updates_batch(updates: list[Update], deps: HandlerDeps) -> Non
     try:
         user_contents: list[str | list[str | BinaryContent]] = []
         for update in updates:
-            user_content = await _resolve_user_content(update, deps)
+            try:
+                user_content = await _resolve_user_content(update, deps)
+            except UserFacingError as e:
+                logger.warning("User-facing error while resolving update: %s", e)
+                try:
+                    await deps.telegram.send_message(chat_id, e.user_message)
+                except Exception as send_err:
+                    logger.warning("Failed to send error reply: %s", send_err)
+                return
             if user_content is None:
                 continue
             if isinstance(user_content, str) and not user_content.strip():

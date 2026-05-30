@@ -4,7 +4,9 @@ import io
 import logging
 from typing import TYPE_CHECKING
 
-from openai import AsyncOpenAI
+from openai import APIError, AsyncOpenAI
+
+from src.errors import OPENAI_QUOTA_EXHAUSTED_MESSAGE, UserFacingError, is_openai_insufficient_quota
 
 if TYPE_CHECKING:
     from src.telegram.client import TelegramClient
@@ -29,7 +31,8 @@ class TranscribeService:
     async def transcribe_voice(self, file_id: str) -> str:
         """
         Get voice file from Telegram, send to Whisper, return transcribed text.
-        Raises ValueError if file is too large or transcription fails.
+        Raises ValueError if file is too large.
+        Raises UserFacingError when OpenAI quota is exhausted.
         """
         file_info = await self._telegram.get_file(file_id)
         file_path = file_info.get("file_path")
@@ -46,10 +49,15 @@ class TranscribeService:
         file_like = io.BytesIO(audio_bytes)
         file_like.name = "voice.ogg"
 
-        response = await self._openai.audio.transcriptions.create(
-            model=WHISPER_MODEL,
-            file=file_like,
-        )
+        try:
+            response = await self._openai.audio.transcriptions.create(
+                model=WHISPER_MODEL,
+                file=file_like,
+            )
+        except APIError as e:
+            if is_openai_insufficient_quota(e):
+                raise UserFacingError(OPENAI_QUOTA_EXHAUSTED_MESSAGE) from e
+            raise
         text = (response.text or "").strip()
         logger.debug("Transcribed %d bytes -> %d chars", len(audio_bytes), len(text))
         return text
