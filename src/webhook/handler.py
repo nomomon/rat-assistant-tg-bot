@@ -4,10 +4,10 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pydantic_ai import Agent, BinaryContent
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-from src.errors import UserFacingError
+from src.errors import GEMINI_BILLING_MESSAGE, UserFacingError, is_gemini_billing_error
 from src.telegram.models import Update
 from src.telegram.client import TelegramClient
 from src.services.history import HistoryService
@@ -241,6 +241,13 @@ async def process_updates_batch(updates: list[Update], deps: HandlerDeps) -> Non
         logger.exception("Agent output validation failed: %s", e)
         try:
             await deps.telegram.send_message(chat_id, ERROR_MESSAGE)
+        except Exception as send_err:
+            logger.warning("Failed to send error reply: %s", send_err)
+    except ModelHTTPError as e:
+        logger.exception("Agent model HTTP error: %s", e)
+        message = GEMINI_BILLING_MESSAGE if is_gemini_billing_error(e) else ERROR_MESSAGE
+        try:
+            await deps.telegram.send_message(chat_id, message)
         except Exception as send_err:
             logger.warning("Failed to send error reply: %s", send_err)
     except Exception as e:
